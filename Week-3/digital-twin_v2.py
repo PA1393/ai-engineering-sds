@@ -1,10 +1,18 @@
-#Updated version of Pouya's digital twin, capable of sending multiple notifications
-#..to a user's phone. 
+'''
+Updated version of Pouya's digital twin, capable of making 
+MULTIPLE LLM tool calls per each message
+''' 
+
 from openai import OpenAI
 import os
 from dotenv import load_dotenv
 from IPython.display import Markdown, display
 import gradio as gr
+from litellm import completion
+import json
+import requests
+import random
+
 
 # Load environment variables from .env file
 load_dotenv()
@@ -13,10 +21,6 @@ OPENAI_API_KEY = os.getenv("OPENAI_API_KEY")
 
 client = OpenAI()
 
-import gradio as gr
-from litellm import completion
-import json
-import requests
 
 pushover_user = os.getenv("PUSHOVER_USER")
 pushover_token = os.getenv("PUSHOVER_TOKEN")
@@ -26,6 +30,46 @@ def send_notification(message: str):
     payload = { "user": pushover_user, "token": pushover_token, "message": message }
     response = requests.post(pushover_url, data=payload)
     return response
+
+#describe pushover as an LLM tool
+send_notification_function = {
+    "name": "send_notification",
+    "description": "Sends a pushover notification to the user's phone via the pushover API. Use this to alert the user about important information.",
+    "parameters": {
+        "type": "object",
+        "properties": {
+            "message": {
+                "type": "string",
+                "description": "The message to send in the notification."
+             }
+            },
+        "required": ["message"]
+        }
+}
+
+#add pushover to list of LLM tool
+tools = [{"type": "function", "function": send_notification_function}]
+
+
+#simulates rolling a 6-sided dice
+def dice_roll():
+    result = random.randint(1,6)
+    return result
+
+# describe function for LLM
+roll_dice_function = {
+    "name": "dice_roll",
+    "description": "Simulate rolling a single six-sided die and returns the result. Use this when the user wnats to roll a die for games, decisions, or random number generation.",
+    "parameters": {
+        "type": "object",
+        "properties": {},
+        "required": []
+        }
+} 
+
+#Add function to list of tools LLM can use
+tools.append({"type": "function", "function": roll_dice_function})
+
 
 def handle_tool_call(tool_calls):
     tool_results = []
@@ -38,8 +82,8 @@ def handle_tool_call(tool_calls):
         if function_name == "send_notification":
             send_notification(args['message'])
             content = f"Notification sent: {args['message']}"
-        # elif function_name == "function_name_v2":
-        #      call function_name_v2
+        elif function_name == "dice_roll":
+            content = f"Rolled: {dice_roll()}"
         # elif function_name == "function_name_v3":
         #      call function_name_v3
         #... 
@@ -49,7 +93,7 @@ def handle_tool_call(tool_calls):
 
         tool_call_result = {
             "role": "tool" ,
-            "content": f"Notification sent: {args['message']}" , 
+            "content": content, 
             "tool_call_id": tool_call.id
         }
         tool_results.append(tool_call_result)
@@ -106,25 +150,10 @@ Topic_Context = {
     "rcc": "Pouya built an Engagement Dashboard for RCC club at SJSU tracking real-time engagement for 300+ members",
 }
 
-send_notification_function = {
-    "name": "send_notification",
-    "description": "Sends a pushover notification to the user's phone via the pushover API. Use this to alert the user about important information.",
-    "parameters": {
-        "type": "object",
-        "properties": {
-            "message": {
-                "type": "string",
-                "description": "The message to send in the notification."
-             }
-            },
-        "required": ["message"]
-        }
-}
-
-tools = [{"type": "function", "function": send_notification_function}]
 
 
 def response_ai(message, history): 
+    
     #Inject dynamic context based on keywords in the user message
     enhanced_system_message = system_message
     for keyword, context in Topic_Context.items():
@@ -145,7 +174,7 @@ def response_ai(message, history):
 
   
 
-    if message.tool_calls:
+    while message.tool_calls:
         #.. handle tool call
         toolDict = handle_tool_call(message.tool_calls)
 
@@ -164,12 +193,7 @@ def response_ai(message, history):
         )
         message = response.choices[0].message
     
-        #.. print(message.content) --- from LLM response
-        return (message.content)
-
-    else:
-        return (message.content)
-
+    return message.content
   
 
 
