@@ -1,6 +1,8 @@
 import os
 from openai import OpenAI
 import gradio as gr
+import sys
+sys.stdout.reconfigure(line_buffering=True)
 
 #-----------------------------------------------------------------------------
 # Setup
