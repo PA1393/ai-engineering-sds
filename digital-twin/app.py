@@ -1,6 +1,5 @@
 import os
 import chromadb
-from litellm import completion
 from openai import OpenAI
 import gradio as gr
 import uuid
