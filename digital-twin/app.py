@@ -1,7 +1,9 @@
 import os
 import chromadb
+from litellm import completion
 from openai import OpenAI
 import gradio as gr
+import uuid
 import sys
 sys.stdout.reconfigure(line_buffering=True)
 
@@ -238,10 +240,10 @@ for item in response.data:
 #-----------------------------------------------------------------------------
 
 #INIT THE VECTOR DB FOR RAG
-chroma_client = chromadb.PersistentClient(path="./digital-twin/chroma_db")
+chroma_client = chromadb.PersistentClient(path="./chroma_db")
 
 #init an empty chroma vector db
-collection = chroma_client.get_or_create_collection(name="digital_twin_v4")
+collection = chroma_client.get_or_create_collection(name="digital_twin")
 
 #add everything to ChromaDB
 if collection.count() == 0:
@@ -278,8 +280,8 @@ Whenver you are not 100 percent sure, you must say “Uh I lowkey forgot… next
 #-----------------------------------------------------------------------------
 
 def response_ai(message, history): 
-    #RAG
-    #embed the query using same model we used for the chunks (ensures compatibility)
+    
+    #RAG: embed the query using same model we used for the chunks (ensures compatibility)
     response = client.embeddings.create(
         model = "text-embedding-3-small",
         input = [message]
@@ -293,40 +295,16 @@ def response_ai(message, history):
     )
     retrieved_chunks = results["documents"][0]
     context = "\n\n".join(retrieved_chunks)
-    enhanced_system_message = f"{system_message}\n\nUse this additional context if relevant:\n\n{context}"    # print("Context this turn:\n", context)
-
+    enhanced_system_message = f"{system_message}\n\nUse this additional context if relevant:\n\n{context}"    
     
     #As usual
     messages = [{"role": "system", "content": enhanced_system_message}] + history + [{"role": "user", "content": message}]
     response = client.chat.completions.create(
         model="gpt-4.1-mini",
-        messages=messages, 
-        tools=tools,
-        tool_choice="auto"
+        messages=messages
     )
     message = response.choices[0].message
 
-  
-
-    while message.tool_calls:
-        #.. handle tool call
-        toolDict = handle_tool_call(message.tool_calls)
-
-        #.. add message to context , i.e messages
-        messages.append(message)
-
-        #.. add info about tool call response to message (context)so t
-        messages.extend(toolDict)
-
-        #.. invoke LLM again to get its updated response    
-        response = completion(
-            model="gpt-4.1-mini",
-            messages = messages,
-            tools=tools,
-            tool_choice="auto"
-        )
-        message = response.choices[0].message
-    
     return message.content
   
   
