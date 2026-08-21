@@ -4,6 +4,9 @@ from openai import OpenAI
 import gradio as gr
 import uuid
 import sys
+import json
+import requests
+import random
 sys.stdout.reconfigure(line_buffering=True)
 
 #-----------------------------------------------------------------------------
@@ -252,7 +255,93 @@ if collection.count() == 0:
         documents=chunks,
         metadatas=metadatas
     )
-    
+
+#-----------------------------------------------------------------------------
+# Tools
+#-----------------------------------------------------------------------------
+
+pushover_user = os.getenv("PUSHOVER_USER")
+pushover_token = os.getenv("PUSHOVER_TOKEN")
+pushover_url = "https://api.pushover.net/1/messages.json"
+
+def send_notification(message: str):
+    payload = { "user": pushover_user, "token": pushover_token, "message": message }
+    response = requests.post(pushover_url, data=payload)
+    return response
+
+#describe pushover as an LLM tool
+send_notification_function = {
+    "name": "send_notification",
+    "description": "Sends a pushover notification to the user's phone via the pushover API. Use this to alert the user about important information.",
+    "parameters": {
+        "type": "object",
+        "properties": {
+            "message": {
+                "type": "string",
+                "description": "The message to send in the notification."
+             }
+            },
+        "required": ["message"]
+        }
+}
+
+#add pushover to list of LLM tool
+tools = [{"type": "function", "function": send_notification_function}]
+
+
+#simulates rolling a 6-sided dice
+def dice_roll():
+    result = random.randint(1,6)
+    return result
+
+# describe function for LLM
+roll_dice_function = {
+    "name": "dice_roll",
+    "description": "Simulate rolling a single six-sided die and returns the result. Use this when the user wnats to roll a die for games, decisions, or random number generation.",
+    "parameters": {
+        "type": "object",
+        "properties": {},
+        "required": []
+        }
+}
+
+#Add function to list of tools LLM can use
+tools.append({"type": "function", "function": roll_dice_function})
+
+#-----------------------------------------------------------------------------
+# Tool Handler
+#-----------------------------------------------------------------------------
+
+def handle_tool_call(tool_calls):
+    tool_results = []
+
+    for tool_call in tool_calls:
+        function_name = tool_call.function.name
+        args = json.loads(tool_call.function.arguments)
+
+        #Route to the appropriate function based on the function_name
+        if function_name == "send_notification":
+            send_notification(args['message'])
+            content = f"Notification sent: {args['message']}"
+        elif function_name == "dice_roll":
+            content = f"Rolled: {dice_roll()}"
+        # elif function_name == "function_name_v3":
+        #      call function_name_v3
+        #...
+        else:
+            content = f"Unkown Function: {function_name}"
+
+
+        tool_call_result = {
+            "role": "tool" ,
+            "content": content,
+            "tool_call_id": tool_call.id
+        }
+        tool_results.append(tool_call_result)
+
+    #return what to add to our "context" (about tool call results), a dictionary
+    return tool_results
+
 #-----------------------------------------------------------------------------
 # System Message
 #-----------------------------------------------------------------------------
@@ -300,9 +389,24 @@ def response_ai(message, history):
     messages = [{"role": "system", "content": enhanced_system_message}] + history + [{"role": "user", "content": message}]
     response = client.chat.completions.create(
         model="gpt-4.1-mini",
-        messages=messages
+        messages=messages,
+        tools=tools,
+        tool_choice="auto"
     )
     message = response.choices[0].message
+
+    while message.tool_calls:
+        tool_result = handle_tool_call(message.tool_calls)
+        messages.append(message)
+        messages.extend(tool_result)
+
+        response = client.chat.completions.create(
+            model="gpt-4.1-mini",
+            messages=messages,
+            tools=tools,
+            tool_choice="auto"
+        )
+        message = response.choices[0].message
 
     return message.content
   
